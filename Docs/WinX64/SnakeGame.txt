@@ -1,0 +1,98 @@
+Use WinX64
+
+init main:
+    window SnakeWindow:
+        title = "WiseL Snake"
+        width = 800
+        height = 600
+        background = "#000000"
+        toolbar = "dark"
+        icon = "res/snake.ico"
+
+    Timer moveUp(150):
+        snake.y = snake.y - 20
+    Timer moveDown(150):
+        snake.y = snake.y + 20
+    Timer moveLeft(150):
+        snake.x = snake.x - 20
+    Timer moveRight(150):
+        snake.x = snake.x + 20
+
+    Timer checkEat(50):
+        if snake.x == food.x:
+            if snake.y == food.y:
+                food.x = random 0 780
+                food.y = random 0 580
+
+    Hook:
+        key.func(onClick):
+            key.w:
+                moveDown.stop
+                moveLeft.stop
+                moveRight.stop
+                moveUp.start
+                checkEat.start
+            key.s:
+                moveUp.stop
+                moveLeft.stop
+                moveRight.stop
+                moveDown.start
+                checkEat.start
+            key.a:
+                moveUp.stop
+                moveDown.stop
+                moveRight.stop
+                moveLeft.start
+                checkEat.start
+            key.d:
+                moveUp.stop
+                moveDown.stop
+                moveLeft.stop
+                moveRight.start
+                checkEat.start
+            key.up:
+                moveDown.stop
+                moveLeft.stop
+                moveRight.stop
+                moveUp.start
+                checkEat.start
+            key.down:
+                moveUp.stop
+                moveLeft.stop
+                moveRight.stop
+                moveDown.start
+                checkEat.start
+            key.left:
+                moveUp.stop
+                moveDown.stop
+                moveRight.stop
+                moveLeft.start
+                checkEat.start
+            key.right:
+                moveUp.stop
+                moveDown.stop
+                moveLeft.stop
+                moveRight.start
+                checkEat.start
+            key.esc = exit
+
+    GameCanvas.addFluentCanvas:
+        x = 0
+        y = 0
+        width = 100%
+        height = 100%
+        background = "#1A1A1A"
+        onPaint:
+            rect(food, 200, 200, 20, 20, "#FF0000")
+            rect(snake, 400, 300, 20, 20, "#00FF00")
+
+    fpsLabel.addFluentLabel:
+        x = 8
+        y = 4
+        width = 180
+        height = 24
+        title = "_showrenderfps"
+        font_size = 14
+        font_color = "#00FF00"
+
+    SnakeWindow.show()
