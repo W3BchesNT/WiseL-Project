@@ -1,0 +1,50 @@
+Use WinX64
+
+init main:
+    window w:
+        title = "File Test"
+        width = 520
+        height = 310
+        background = "#1E1E1E"
+        toolbar = "dark"
+
+    myEdit.addFluentTextbox:
+        x = 10
+        y = 10
+        width = 480
+        height = 200
+        background = "#2D2D2D"
+        font_color = "#CCCCCC"
+        font_size = 14
+
+    btnLoad.addFluentButton:
+        title = "Load"
+        x = 10
+        y = 230
+        width = 100
+        height = 30
+        background = "#0078D4"
+        font_color = "#FFFFFF"
+        gravity = "center"
+
+    btnLoad.addFunction:
+        title = "Pressed"
+        file.addFileRead "test.txt":
+            myEdit.title = [file.content]
+
+    btnSave.addFluentButton:
+        title = "Save"
+        x = 120
+        y = 230
+        width = 100
+        height = 30
+        background = "#008000"
+        font_color = "#FFFFFF"
+        gravity = "center"
+
+    btnSave.addFunction:
+        title = "Pressed"
+        file.addFileWrite "test.txt":
+            content = myEdit.title
+
+    w.show()

@@ -1,0 +1,5 @@
+Use WinX64
+
+init main - Старт
+	window w:
+	w.show()
