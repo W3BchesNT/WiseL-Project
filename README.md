@@ -1,34 +1,37 @@
-###
-📁 WiseL/
+# Структура проекта WiseL-Project
+
+```text
+📁 WiseL-Project/
 │
-├── 📄 main.wise                    # Исходный код на языке WiseL
-├── 📄 oniCompiler.bat              # Батник для запуска компиляции
+├── 📁 Compiler/                     # Компилятор
 │
-├── 📁 res/                         # Ресурсы
-│   └── 📄 note.ico
+├── 📁 Docs/                         # Документация (в будущем)
 │
-├── 📁 Compiler/                    # Компилятор
-│   ├── 📄 oniLink.py               # Главный движок: парсинг, генерация, FASM
-│   ├── 📁 Fasm						# Flat Assembler
-│   └── 📁 Macros/WinX64/           # Макросы для FASM
-│       ├── 📄 hooks.inc            # Хуки клавиш, таймеры, мышь
-│       ├── 📄 vector.inc           # Графические примитивы GDI
-│       └── 📄 win64.inc            # Окна, буферизация, WindowProc
-│
-├── 📁 Library/                     # Библиотеки
-│   ├── 📁 Core/                    # Платформонезависимые парсеры
-│   │   ├── 📄 Console.py           # Парсер консольного WiseL → AST
-│   │   ├── 📄 Gui.py               # Парсер GUI WiseL (окна, виджеты, меню) → AST
-│   │   ├── 📄 Values.py            # Парсер переменных (int, string, bool)
-│   │   ├── 📄 Conditions.py        # Парсер if/else (заготовка)
-│   │   └── 📄 Fluent.py            # Стили, темы, цветовые схемы (заготовка)
+├── 📁 Library/                      # Библиотеки
+│   ├── 📁 Core/                     # Платформонезависимые парсеры
+│   │   ├── 📄 Console.py            # Парсер консольного WiseL → AST
+│   │   ├── 📄 Gui.py                # Парсер GUI WiseL (окна, виджеты, меню) → AST
+│   │   ├── 📄 Values.py             # Парсер переменных (int, string, bool)
+│   │   ├── 📄 Conditions.py         # Парсер if/else (заготовка)
+│   │   └── 📄 Fluent.py             # Стили, темы, цветовые схемы (заготовка)
 │   │
-│   ├── 📁 Windows/                 # Генераторы ASM для Windows
-│   │   ├── 📄 ConsoleGen64.py      # AST → ASM (консоль)
-│   │   └── 📄 GuiGen64.py          # AST → ASM (GUI)
+│   ├── 📁 Windows/                  # Генераторы ASM для Windows
+│   │   ├── 📄 ConsoleGen64.py       # AST → ASM (консоль)
+│   │   └── 📄 GuiGen64.py           # AST → ASM (GUI)
 │   │
-│   └── 📁 Linux/                   # Linux-реализация (в будущем)
-│       └── 📄 Empty
+│   └── 📁 Linux/                    # Linux-реализация (в будущем)
+│       └── 📄 Empty                 # Пусто
 │
-└── 📁 Docs/                        # Документация (в будущем)
-###
+├── 📁 WiseL-Project/                # Вложенная папка проекта
+│
+├── 📁 res/                          # Ресурсы
+│
+├── 📄 LICENSE                       # Лицензия проекта
+├── 📄 README.md                     # Описание репозитория (этот файл)
+├── 📄 ie4uinit.exe -show.bat        # Скрипт очистки/обновления иконок
+├── 📄 main.wise                     # Исходный код на языке WiseL
+├── 📄 oniCompiler.bat               # Батник для запуска компиляции
+├── 📄 oniOutBuild.bat               # Батник для сборки готового файла
+├── 📄 out.asm                       # Выходной файл ассемблера
+└── 📄 test.txt                      # Тестовый текстовый файл
+```
