@@ -1,4 +1,4 @@
-# Library/Windows/GuiGen64.py — Генератор ASM для GUI Windows x64
+# Library/Windows/GuiGen64.py
 import os, sys, ctypes, re
 from ctypes import wintypes
 
@@ -13,6 +13,14 @@ import Timer as TimerParser
 import TimerGen64
 import CanvasGen64
 
+PREFIX = {
+    "fluent_btn": "btn",
+    "fluent_label": "label",
+    "fluent_textbox": "edit",
+    "fluent_canvas": "canvas",
+}
+
+GRAVITY = {"left": "0x10", "center": "37", "right": "0x12"}
 
 def _hex_to_bgr(hex_color):
     c = hex_color.lstrip('#')
@@ -33,18 +41,168 @@ def _utf16(text):
     return ", ".join([f"0x{ord(c):04X}" for c in str(text)] + ["0"])
 
 
+def _gen_event_actions(evt, widget_name, widget_type):
+    code = []
+    actions = evt.actions
+
+    if '__asm__' in actions:
+        for asm_line in actions['__asm__']:
+            code.append(f"    {asm_line.strip()}")
+        return code
+
+    if '__file_ops__' in actions:
+        for idx, op in enumerate(actions['__file_ops__']):
+            path_label = f"_fpath_{abs(hash(op['path'])) % 10000}"
+            op_label = f"{widget_name}_{path_label}_{idx}"
+            if op["type"] == "read":
+                code += [
+                    f"    invoke CreateFileW, {path_label}, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0",
+                    f"    cmp rax, INVALID_HANDLE_VALUE",
+                    f"    je .file_done_{op_label}",
+                    f"    mov [file_handle], rax",
+                    f"    invoke ReadFile, [file_handle], file_buffer, 1048575, file_bytes_read, 0",
+                    f"    mov rcx, [file_bytes_read]",
+                    f"    mov byte [file_buffer + rcx], 0",
+                    f"    invoke CloseHandle, [file_handle]",
+                    f"    invoke MultiByteToWideChar, 65001, 0, file_buffer, -1, file_wide_buffer, 524288",
+                ]
+                target = op.get("target", {})
+                if target.get("prop") == "title":
+                    code.append(f"    invoke SetWindowTextW, [hEdit_{target['widget']}], file_wide_buffer")
+                code.append(f"  .file_done_{op_label}:")
+            
+            elif op["type"] == "write":
+                source = op.get("source", {})
+                code += [
+                    f"    invoke CreateFileW, {path_label}, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0",
+                    f"    cmp rax, INVALID_HANDLE_VALUE",
+                    f"    je .file_done_{op_label}",
+                    f"    mov [file_handle], rax",
+                ]
+                if source.get("prop") == "title":
+                    code += [
+                        f"    invoke GetWindowTextW, [hEdit_{source['widget']}], file_wide_buffer, 524288",
+                        f"    invoke WideCharToMultiByte, 65001, 0, file_wide_buffer, -1, file_buffer, 1048576, 0, 0",
+                        f"    invoke lstrlenA, file_buffer",
+                        f"    mov [file_bytes_read], rax",
+                        f"    invoke WriteFile, [file_handle], file_buffer, [file_bytes_read], file_bytes_read, 0",
+                    ]
+                code += [
+                    f"    invoke CloseHandle, [file_handle]",
+                    f"  .file_done_{op_label}:",
+                ]
+
+    for key, value in actions.items():
+        if key.startswith('__'):
+            continue
+            
+        if key == 'title':
+            if widget_type == "fluent_btn":
+                label = f"_btn_text_{widget_name}"
+            elif widget_type == "fluent_label":
+                label = f"_label_text_{widget_name}"
+            elif widget_type in ("fluent_textbox"):
+                code.append(f"    invoke SetWindowTextW, [hEdit_{widget_name}], _event_text_{widget_name}")
+                continue
+            else:
+                continue
+
+            code.append(f"    lea rdi, [{label}]")
+            code.append(f"    mov ecx, 64")
+            code.append(f"    xor eax, eax")
+            code.append(f"  .clear_title_{widget_name}:")
+            code.append(f"    mov word [rdi], ax")
+            code.append(f"    add rdi, 2")
+            code.append(f"    loop .clear_title_{widget_name}")
+            
+            code.append(f"    lea rdi, [{label}]")
+            for char in str(value):
+                code.append(f"    mov word [rdi], 0x{ord(char):04X}")
+                code.append(f"    add rdi, 2")
+
+        elif key in ('x', 'y', 'width', 'height'):
+            p = PREFIX.get(widget_type)
+            if p:
+                rect = f"{p}_rect_{widget_name}"
+            
+            if rect:
+                val = int(value)
+                if key == "width":
+                    code.append(f"    mov eax, [{rect}.left]")
+                    code.append(f"    add eax, {val}")
+                    code.append(f"    mov [{rect}.right], eax")
+                elif key == "height":
+                    code.append(f"    mov eax, [{rect}.top]")
+                    code.append(f"    add eax, {val}")
+                    code.append(f"    mov [{rect}.bottom], eax")
+                elif key == "x":
+                    code.append(f"    mov eax, [{rect}.right]")
+                    code.append(f"    sub eax, [{rect}.left]")
+                    code.append(f"    mov [{rect}.left], {val}")
+                    code.append(f"    mov [{rect}.right], eax")
+                    code.append(f"    add [{rect}.right], {val}")
+                elif key == "y":
+                    code.append(f"    mov eax, [{rect}.bottom]")
+                    code.append(f"    sub eax, [{rect}.top]")
+                    code.append(f"    mov [{rect}.top], {val}")
+                    code.append(f"    mov [{rect}.bottom], eax")
+                    code.append(f"    add [{rect}.bottom], {val}")
+
+        elif key in ('background', 'font_color', 'border_color', 'font_size'):
+            p = PREFIX.get(widget_type)
+            if p:
+                val = _hex_to_bgr(value) if key != 'font_size' else value
+                code.append(f"    mov [{p}_{key}_{widget_name}], {val}")
+
+    return code
+
+
+def _btn_paint(name, sfx):
+    return [
+        f"    WiseFillRect [mem_dc], btn_rect_{name}, [btn_bg{sfx}_{name}]",
+        f"    WiseDrawText [mem_dc], _btn_text_{name}, btn_rect_{name}, [btn_gravity_{name}], [btn_font{sfx}_{name}]",
+        f"    invoke CreateSolidBrush, [btn_border{sfx}_{name}]",
+        f"    mov r15, rax",
+        f"    lea rdx, [btn_rect_{name}]",
+        f"    invoke FrameRect, [mem_dc], rdx, r15",
+        f"    invoke DeleteObject, r15",
+    ]
+
+
+def _mouse_check(name, rect_prefix, suffix):
+    return [
+        f"  cmp eax, [{rect_prefix}_rect_{name}.left]",
+        f"  jl .skip_{suffix}_{name}",
+        f"  cmp eax, [{rect_prefix}_rect_{name}.right]",
+        f"  jg .skip_{suffix}_{name}",
+        f"  cmp edx, [{rect_prefix}_rect_{name}.top]",
+        f"  jl .skip_{suffix}_{name}",
+        f"  cmp edx, [{rect_prefix}_rect_{name}.bottom]",
+        f"  jg .skip_{suffix}_{name}",
+    ]
+
+
+def _resize_pct(var_name, rect_name, dim, pct):
+    return [
+        f"  mov eax, [{var_name}]",
+        f"  imul eax, {pct}",
+        f"  mov ecx, 100",
+        f"  xor edx, edx",
+        f"  div ecx",
+        f"  mov [{rect_name}.{dim}], eax",
+    ]
+
+
 def generate(ast):
     data_lines = [
         "WiseInit64",
         "sys_win_count dq 1",
-        "  fps_counter dd 0",
-        "  fps_last_tick dd 0",
-        "  fps_current dd 0",
-        "  fps_buf dw 16 dup(0)",
-        "  fps_perf_freq dq 0",
-        "  fps_perf_start dq 0",
-        "  fps_perf_end dq 0",
-        "  fps_target_ms dd 0",
+        "  file_bytes_read dq 0",
+        "  file_handle dq 0",
+    ]
+    bss_lines = [
+        "  file_buffer db 1048576 dup (?)",
+        "  file_wide_buffer du 524288 dup (?)",
     ]
     code_lines = []
     windows = []
@@ -55,14 +213,21 @@ def generate(ast):
     timers = []
     global_menu_id = 5000
 
-    has_fps_label = False
-    fps_label_name = ""
-    fps_max = 0
+    file_paths = set()
+    for node in ast:
+        if isinstance(node, Gui.EventDecl) and '__file_ops__' in node.actions:
+            for op in node.actions['__file_ops__']:
+                file_paths.add(op['path'])
+
+    for fp in file_paths:
+        label = f"_fpath_{abs(hash(fp)) % 10000}"
+        if not any(label in line for line in data_lines):
+            data_lines.append(f"  {label} du '{fp}',0")
 
     for node in ast:
         if isinstance(node, TimerParser.TimerDecl):
             timers.append(node)
-            data_lines += TimerGen64.generate_data([node])
+            data_lines += TimerGen64.generate_data([node], auto_start_all=True)
 
         elif isinstance(node, Hooks.HookDecl):
             hook = node
@@ -105,10 +270,12 @@ def generate(ast):
                 click_fg = node.props.get('click.font_color', fg)
                 click_border = node.props.get('click.border_color', border)
                 gravity = node.props.get('gravity', 'center')
-                grav_flag = "37" if gravity == "center" else ("0x12" if gravity == "right" else "0x10")
+                grav_flag = GRAVITY.get(gravity, "0x10")
+
+                title_bytes = _utf16(title)
+                data_lines.append(f"  _btn_text_{node.name} dw {title_bytes}, 64 dup(0)")
 
                 data_lines += [
-                    f"  _btn_text_{node.name} dw {_utf16(title)}",
                     f"  btn_rect_{node.name} RECT {x}, {y}, {x + w}, {y + h}",
                     f"  btn_state_{node.name} dd 0",
                     f"  btn_gravity_{node.name} dd {grav_flag}",
@@ -131,16 +298,15 @@ def generate(ast):
                 title = node.props.get('title', 'Label')
 
                 if title == '_showrenderfps':
-                    has_fps_label = True
-                    fps_label_name = node.name
-                    data_lines.append(f"  _label_text_{node.name} dw 'F','P','S',':',' ','0',0,0,0,0,0,0,0,0,0,0")
+                    data_lines.append(f"  _label_text_{node.name} dw 'F','P','S',':',' ','0',0,0,0,0,0,0,0,0,0,0, 64 dup(0)")
                 else:
-                    data_lines.append(f"  _label_text_{node.name} dw {_utf16(title)}")
+                    title_bytes = _utf16(title)
+                    data_lines.append(f"  _label_text_{node.name} dw {title_bytes}, 64 dup(0)")
 
                 fg = node.props.get('font_color', '#000000')
                 fs = node.props.get('font_size', '14')
                 gravity = node.props.get('gravity', 'left')
-                grav_flag = "37" if gravity == "center" else ("0x12" if gravity == "right" else "0x10")
+                grav_flag = GRAVITY.get(gravity, "0x10")
 
                 data_lines += [
                     f"  label_rect_{node.name} RECT {x}, {y}, {x + w}, {y + h}",
@@ -149,7 +315,7 @@ def generate(ast):
                     f"  label_gravity_{node.name} dd {grav_flag}",
                 ]
 
-            elif node.wtype in ("fluent_editline", "fluent_textbox"):
+            elif node.wtype == "fluent_textbox":
                 x = int(node.props.get('x', 0))
                 y = int(node.props.get('y', 0))
                 w_str = str(node.props.get('width', '200'))
@@ -160,7 +326,6 @@ def generate(ast):
                 bg = node.props.get('background', '#FFFFFF')
                 fg = node.props.get('font_color', '#000000')
                 fs = node.props.get('font_size', '14')
-                style_val = "ES_MULTILINE or ES_AUTOVSCROLL or WS_VSCROLL" if node.wtype == "fluent_textbox" else "ES_AUTOHSCROLL"
 
                 data_lines += [
                     f"  hEdit_{node.name} dq 0",
@@ -172,6 +337,7 @@ def generate(ast):
                 ]
                 if title:
                     data_lines.append(f"  _init_text_{node.name} du {_utf16(title)}")
+                data_lines.append(f"  _event_text_{node.name} du 256 dup(0)")
 
             elif node.wtype == "fluent_canvas":
                 if 'fps_max' in node.props:
@@ -208,7 +374,7 @@ def generate(ast):
             icon_full_path = win.props['icon']
 
     has_btns = any(w.wtype == "fluent_btn" for w in widgets)
-    has_edits = any(w.wtype in ("fluent_editline", "fluent_textbox") for w in widgets)
+    has_edits = any(w.wtype == "fluent_textbox" for w in widgets)
     has_menu = len(menus) > 0
     has_hook = hook is not None and len(hook.bindings) > 0
     has_timer = len(timers) > 0
@@ -225,12 +391,6 @@ def generate(ast):
         "    lea rcx, [gdiplusToken]", "    lea rdx, [gdiplusInput]",
         "    xor r8, r8", "    call [GdiplusStartup]",
     ]
-
-    if fps_max > 0:
-        code_lines += [
-            f"    invoke QueryPerformanceFrequency, fps_perf_freq",
-            f"    mov dword [fps_target_ms], {1000 // fps_max}",
-        ]
 
     code_lines += [
         f"    mov [wc_{win.name}.style], CS_HREDRAW or CS_VREDRAW",
@@ -258,57 +418,22 @@ def generate(ast):
         f"    invoke CreateWindowExW, 0, _class_{win.name}, _title_{win.name}, WS_OVERLAPPEDWINDOW or WS_VISIBLE or WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT, {w}, {h}, 0, 0, [wc_{win.name}.hInstance], 0",
         f"    test rax, rax", f"    jz exit_app",
         f"    mov [hwnd_{win.name}], rax", f"    mov [win_width], {w}", f"    mov [win_height], {h}",
-    ]
-
-    if fps_max > 0:
-        code_lines += [
-            f"  .game_loop:",
-            f"    invoke QueryPerformanceCounter, fps_perf_start",
-            f"    invoke InvalidateRect, [hwnd_{win.name}], 0, 0",
-            f"    lea rcx, [msg]",
-            f"    invoke PeekMessage, rcx, 0, 0, 0, 1",
-            f"    test eax, eax",
-            f"    jz .do_sleep",
-            f"    cmp [msg.message], 18",
-            f"    je exit_app",
-            f"    lea rcx, [msg]",
-            f"    invoke TranslateMessage, rcx",
-            f"    lea rcx, [msg]",
-            f"    invoke DispatchMessage, rcx",
-            f"  .do_sleep:",
-            f"    invoke QueryPerformanceCounter, fps_perf_end",
-            f"    mov rax, [fps_perf_end]",
-            f"    sub rax, [fps_perf_start]",
-            f"    imul rax, 1000",
-            f"    xor edx, edx",
-            f"    div qword [fps_perf_freq]",
-            f"    mov ecx, [fps_target_ms]",
-            f"    sub ecx, eax",
-            f"    cmp ecx, 0",
-            f"    jle .game_loop",
-            f"    invoke Sleep, ecx",
-            f"    jmp .game_loop",
-            f"  exit_app:",
-        ]
-    else:
-        code_lines += [
-            f"  .game_loop:",
-            f"    invoke InvalidateRect, [hwnd_{win.name}], 0, 0",
-            f"    lea rcx, [msg]",
-            f"    invoke PeekMessage, rcx, 0, 0, 0, 1",
-            f"    test eax, eax",
-            f"    jz .game_loop",
-            f"    cmp [msg.message], 18",
-            f"    je exit_app",
-            f"    lea rcx, [msg]",
-            f"    invoke TranslateMessage, rcx",
-            f"    lea rcx, [msg]",
-            f"    invoke DispatchMessage, rcx",
-            f"    jmp .game_loop",
-            f"  exit_app:",
-        ]
-
-    code_lines += [
+        f"  .game_loop:",
+        f"    lea rcx, [msg]",
+        f"    invoke PeekMessage, rcx, 0, 0, 0, 1",
+        f"    test eax, eax",
+        f"    jnz .process_msg",
+        f"    invoke WaitMessage",
+        f"    jmp .game_loop",
+        f"  .process_msg:",
+        f"    cmp [msg.message], 18",
+        f"    je exit_app",
+        f"    lea rcx, [msg]",
+        f"    invoke TranslateMessage, rcx",
+        f"    lea rcx, [msg]",
+        f"    invoke DispatchMessage, rcx",
+        f"    jmp .game_loop",
+        f"  exit_app:",
         f"    invoke CoUninitialize",
         f"    mov rcx, [msg.wParam]",
         f"    invoke ExitProcess, rcx",
@@ -344,7 +469,6 @@ def generate(ast):
     ]
     code_lines += disp_lines
 
-    # WM_CREATE
     code_lines.append(f"  .wm_create:")
     if toolbar == "dark":
         code_lines += [
@@ -379,7 +503,7 @@ def generate(ast):
 
     eid = 2000
     for wgt in widgets:
-        if wgt.wtype in ("fluent_editline", "fluent_textbox"):
+        if wgt.wtype == "fluent_textbox":
             name = wgt.name
             x = int(wgt.props.get('x', 0))
             y = int(wgt.props.get('y', 0))
@@ -387,12 +511,11 @@ def generate(ast):
             wh_str = str(wgt.props.get('height', '30'))
             ww = 800 if str(ww_str).endswith('%') else int(ww_str)
             wh = 600 if str(wh_str).endswith('%') else int(wh_str)
-            style_val = "ES_MULTILINE or ES_AUTOVSCROLL or WS_VSCROLL" if wgt.wtype == "fluent_textbox" else "ES_AUTOHSCROLL"
 
             code_lines += [
                 f"    invoke CreateSolidBrush, [edit_bg_{name}]",
                 f"    mov [edit_brush_{name}], rax",
-                f"    invoke CreateWindowExW, 0, edit_class, 0, WS_CHILD or WS_VISIBLE or {style_val}, {x}, {y}, {ww}, {wh}, rbx, {eid}, [wc_{win.name}.hInstance], 0",
+                f"    invoke CreateWindowExW, 0, edit_class, 0, WS_CHILD or WS_VISIBLE or ES_MULTILINE or ES_AUTOVSCROLL or WS_VSCROLL, {x}, {y}, {ww}, {wh}, rbx, {eid}, [wc_{win.name}.hInstance], 0",
                 f"    mov [hEdit_{name}], rax",
                 f"    invoke SendMessageW, rax, WM_SETFONT, [hFont], 1",
             ]
@@ -407,7 +530,6 @@ def generate(ast):
         f"    jmp .finish",
     ]
 
-    # WM_COMMAND
     if has_menu:
         code_lines.append(f"  .wm_command:")
         menu_id = 5000
@@ -420,9 +542,7 @@ def generate(ast):
                     ]
                     for evt in events:
                         if evt.widget == item.action and evt.event == "onClick":
-                            if '__asm__' in evt.actions:
-                                for asm_line in evt.actions['__asm__']:
-                                    code_lines.append(f"    {asm_line.strip()}")
+                            code_lines += _gen_event_actions(evt, item.action, "fluent_btn")
                     code_lines += [
                         f"    invoke InvalidateRect, rbx, 0, 1",
                         f"    jmp .finish",
@@ -431,11 +551,10 @@ def generate(ast):
                     menu_id += 1
         code_lines.append(f"    jmp .finish")
 
-    # WM_CTLCOLOREDIT
     if has_edits:
         code_lines.append(f"  .wm_ctlcoloredit:")
         for wgt in widgets:
-            if wgt.wtype in ("fluent_editline", "fluent_textbox"):
+            if wgt.wtype == "fluent_textbox":
                 name = wgt.name
                 code_lines += [
                     f"    cmp r14, [hEdit_{name}]",
@@ -452,33 +571,16 @@ def generate(ast):
             f"    ret",
         ]
 
-    # WM_SIZE
     code_lines += [f"  .wm_size:", f"    size_handler"]
     for wgt in widgets:
-        if wgt.wtype in ("fluent_textbox", "fluent_editline"):
+        if wgt.wtype == "fluent_textbox":
             name = wgt.name
             wp = str(wgt.props.get('width', '100%'))
             hp = str(wgt.props.get('height', '100%'))
             if wp.endswith('%'):
-                pct = int(wp[:-1])
-                code_lines += [
-                    f"    mov eax, [win_width]",
-                    f"    imul eax, {pct}",
-                    f"    mov ecx, 100",
-                    f"    xor edx, edx",
-                    f"    div ecx",
-                    f"    mov [edit_rect_{name}.right], eax",
-                ]
+                code_lines += _resize_pct("win_width", f"edit_rect_{name}", "right", int(wp[:-1]))
             if hp.endswith('%'):
-                pct = int(hp[:-1])
-                code_lines += [
-                    f"    mov eax, [win_height]",
-                    f"    imul eax, {pct}",
-                    f"    mov ecx, 100",
-                    f"    xor edx, edx",
-                    f"    div ecx",
-                    f"    mov [edit_rect_{name}.bottom], eax",
-                ]
+                code_lines += _resize_pct("win_height", f"edit_rect_{name}", "bottom", int(hp[:-1]))
             if wp.endswith('%') or hp.endswith('%'):
                 code_lines += [
                     f"    invoke SetWindowPos, [hEdit_{name}], 0, 0, 0, [edit_rect_{name}.right], [edit_rect_{name}.bottom], 0x4",
@@ -487,52 +589,10 @@ def generate(ast):
             code_lines += CanvasGen64.gen_resize(wgt)
     code_lines.append(f"    jmp .finish")
 
-    # WM_KEYDOWN
     if has_hook:
         code_lines += HooksGen64.generate_keydown_handler(hook)
 
-    # WM_PAINT
     code_lines.append(f"  .wm_paint:")
-
-    code_lines += [
-        f"    inc dword [fps_counter]",
-        f"    invoke GetTickCount",
-        f"    mov ecx, eax",
-        f"    sub ecx, [fps_last_tick]",
-        f"    cmp ecx, 1000",
-        f"    jl .fps_skip",
-        f"    mov [fps_last_tick], eax",
-        f"    mov eax, [fps_counter]",
-        f"    mov [fps_current], eax",
-        f"    mov dword [fps_counter], 0",
-        f"    mov eax, [fps_current]",
-        f"    lea rdi, [fps_buf]",
-        f"    call fps_itoa",
-    ]
-
-    if has_fps_label:
-        code_lines += [
-            f"    lea rsi, [fps_buf]",
-            f"    lea rdi, [_label_text_{fps_label_name} + 10]",
-            f"    mov ecx, 5",
-            f"  .fps_clr:",
-            f"    mov word [rdi], ' '",
-            f"    add rdi, 2",
-            f"    loop .fps_clr",
-            f"    lea rsi, [fps_buf]",
-            f"    lea rdi, [_label_text_{fps_label_name} + 10]",
-            f"  .fps_cpy:",
-            f"    mov ax, [rsi]",
-            f"    test ax, ax",
-            f"    jz .fps_end",
-            f"    mov [rdi], ax",
-            f"    add rsi, 2",
-            f"    add rdi, 2",
-            f"    jmp .fps_cpy",
-            f"  .fps_end:",
-        ]
-
-    code_lines.append(f"  .fps_skip:")
 
     if has_timer:
         code_lines += TimerGen64.generate_timer_handler(timers)
@@ -545,33 +605,15 @@ def generate(ast):
             code_lines += [
                 f"    cmp [btn_state_{name}], 2",
                 f"    jne .nc_{name}",
-                f"    WiseFillRect [mem_dc], btn_rect_{name}, [btn_bg_click_{name}]",
-                f"    WiseDrawText [mem_dc], _btn_text_{name}, btn_rect_{name}, [btn_gravity_{name}], [btn_font_click_{name}]",
-                f"    invoke CreateSolidBrush, [btn_border_click_{name}]",
-                f"    mov r15, rax",
-                f"    lea rdx, [btn_rect_{name}]",
-                f"    invoke FrameRect, [mem_dc], rdx, r15",
-                f"    invoke DeleteObject, r15",
+                *_btn_paint(name, "_click"),
                 f"    jmp .fd_{name}",
                 f"  .nc_{name}:",
                 f"    cmp [btn_state_{name}], 1",
                 f"    jne .nh_{name}",
-                f"    WiseFillRect [mem_dc], btn_rect_{name}, [btn_bg_hover_{name}]",
-                f"    WiseDrawText [mem_dc], _btn_text_{name}, btn_rect_{name}, [btn_gravity_{name}], [btn_font_hover_{name}]",
-                f"    invoke CreateSolidBrush, [btn_border_hover_{name}]",
-                f"    mov r15, rax",
-                f"    lea rdx, [btn_rect_{name}]",
-                f"    invoke FrameRect, [mem_dc], rdx, r15",
-                f"    invoke DeleteObject, r15",
+                *_btn_paint(name, "_hover"),
                 f"    jmp .fd_{name}",
                 f"  .nh_{name}:",
-                f"    WiseFillRect [mem_dc], btn_rect_{name}, [btn_bg_{name}]",
-                f"    WiseDrawText [mem_dc], _btn_text_{name}, btn_rect_{name}, [btn_gravity_{name}], [btn_font_{name}]",
-                f"    invoke CreateSolidBrush, [btn_border_{name}]",
-                f"    mov r15, rax",
-                f"    lea rdx, [btn_rect_{name}]",
-                f"    invoke FrameRect, [mem_dc], rdx, r15",
-                f"    invoke DeleteObject, r15",
+                *_btn_paint(name, ""),
                 f"  .fd_{name}:",
             ]
 
@@ -591,63 +633,56 @@ def generate(ast):
 
     code_lines.append(f"    PaintEnd")
 
-    # WM_MOUSEMOVE
     if has_btns:
         code_lines += [f"  .wm_mousemove:", f"    GetMousePos"]
         for wgt in widgets:
             if wgt.wtype == "fluent_btn":
                 name = wgt.name
                 code_lines += [
-                    f"    if_mouse_in btn_rect_{name}, {name}",
+                    *_mouse_check(name, "btn", "hover"),
                     f"    cmp [btn_state_{name}], 1",
-                    f"    je .nr_{name}",
+                    f"    je .hover_done_{name}",
                     f"    mov [btn_state_{name}], 1",
                     f"    invoke InvalidateRect, rbx, 0, 0",
-                    f"    jmp .md_{name}",
-                    f"    else_mouse {name}",
+                    f"    jmp .hover_done_{name}",
+                    f"  .skip_hover_{name}:",
                     f"    cmp [btn_state_{name}], 0",
-                    f"    je .nr_{name}",
+                    f"    je .hover_done_{name}",
                     f"    mov [btn_state_{name}], 0",
                     f"    invoke InvalidateRect, rbx, 0, 0",
-                    f"    end_mouse {name}",
-                    f"  .nr_{name}:",
+                    f"  .hover_done_{name}:",
                 ]
         code_lines += [
             f"    invoke SetCursor, [wc_{win.name}.hCursor]",
             f"    jmp .finish",
         ]
 
-    # WM_LBUTTONDOWN
     if has_btns:
         code_lines += [f"  .wm_lbuttondown:", f"    GetMousePos"]
         for wgt in widgets:
             if wgt.wtype == "fluent_btn":
                 name = wgt.name
                 has_evt = any(e.widget == name and e.event == "onClick" for e in events)
-                code_lines += [f"    if_mouse_in btn_rect_{name}, cl_{name}"]
+                code_lines += [
+                    *_mouse_check(name, "btn", "click"),
+                    f"    mov [btn_state_{name}], 2",
+                ]
                 if has_evt:
-                    code_lines.append(f"    mov [btn_state_{name}], 2")
                     for evt in events:
                         if evt.widget == name and evt.event == "onClick":
-                            if '__asm__' in evt.actions:
-                                for asm_line in evt.actions['__asm__']:
-                                    code_lines.append(f"    {asm_line.strip()}")
-                    code_lines.append(f"    invoke InvalidateRect, rbx, 0, 1")
+                            code_lines += _gen_event_actions(evt, name, "fluent_btn")
                 code_lines += [
-                    f"    jmp .mc_{name}",
-                    f"    else_mouse cl_{name}",
-                    f"    end_mouse cl_{name}",
-                    f"  .mc_{name}:",
+                    f"    invoke InvalidateRect, rbx, 0, 1",
+                    f"  .skip_click_{name}:",
                 ]
         code_lines.append(f"    jmp .finish")
 
-    # WM_DESTROY
     code_lines += [
         f"  .wm_destroy:",
         f"    DestroyGDI",
     ]
     for wgt in widgets:
-        if wgt.wtype in ("fluent_editline", "fluent_textbox"):
+        if wgt.wtype == "fluent_textbox":
             code_lines.append(f"    invoke DeleteObject, [edit_brush_{wgt.name}]")
     code_lines += [
         f"    dec qword [sys_win_count]",
@@ -660,35 +695,6 @@ def generate(ast):
         f"    pop r13 r12 r14 rdi rsi rbx",
         f"    ret",
         f"endp",
-    ]
-
-    code_lines += [
-        "fps_itoa:",
-        "    push rbx rcx rdx",
-        "    mov ebx, 10",
-        "    xor ecx, ecx",
-        "    cmp eax, 0",
-        "    jne .itoa_push",
-        "    mov word [rdi], '0'",
-        "    mov word [rdi+2], 0",
-        "    pop rdx rcx rbx",
-        "    ret",
-        "  .itoa_push:",
-        "    xor edx, edx",
-        "    div ebx",
-        "    add dl, '0'",
-        "    push rdx",
-        "    inc ecx",
-        "    test eax, eax",
-        "    jnz .itoa_push",
-        "  .itoa_pop:",
-        "    pop rax",
-        "    mov [rdi], ax",
-        "    add rdi, 2",
-        "    loop .itoa_pop",
-        "    mov word [rdi], 0",
-        "    pop rdx rcx rbx",
-        "    ret",
     ]
 
     icon_section = ""
@@ -711,6 +717,9 @@ include 'Compiler/Macros/WinX64/hooks.inc'
 
 section '.data' data readable writeable
 {chr(10).join(data_lines)}
+
+section '.bss' readable writeable
+{chr(10).join(bss_lines)}
 
 section '.code' code readable executable
 {chr(10).join(code_lines)}

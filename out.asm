@@ -8,43 +8,51 @@ include 'Compiler/Macros/WinX64/hooks.inc'
 section '.data' data readable writeable
 WiseInit64
 sys_win_count dq 1
-  fps_counter dd 0
-  fps_last_tick dd 0
-  fps_current dd 0
-  fps_buf dw 16 dup(0)
-  fps_perf_freq dq 0
-  fps_perf_start dq 0
-  fps_perf_end dq 0
-  fps_target_ms dd 0
+  file_bytes_read dq 0
+  file_handle dq 0
+  _fpath_6809 du 'test.txt',0
   _class_w du 'Class_w',0
-  _title_w du 0x0057, 0x0069, 0x0073, 0x0065, 0x0020, 0x0057, 0x0069, 0x006E, 0x0064, 0x006F, 0x0077, 0
+  _title_w du 0x0046, 0x0069, 0x006C, 0x0065, 0x0020, 0x0054, 0x0065, 0x0073, 0x0074, 0
   wc_w WNDCLASS
   hwnd_w dq 0
-  win_bg_w dd 0x00FFFFFF
-  _label_text_label dw 0x004C, 0x0061, 0x0062, 0x0065, 0x006C, 0x0020, 0x0031, 0
-  label_rect_label RECT 10, 10, 310, 40
-  label_font_label dd 0x00000000
-  label_font_size_label dd 16
-  label_gravity_label dd 0x10
-  _btn_text_button dw 0x0042, 0x0075, 0x0074, 0x0074, 0x006F, 0x006E, 0x0020, 0x0031, 0
-  btn_rect_button RECT 10, 40, 130, 76
-  btn_state_button dd 0
-  btn_gravity_button dd 37
-  btn_bg_button dd 0x00D47800
-  btn_font_button dd 0x00FFFFFF
-  btn_border_button dd 0x00D47800
-  btn_bg_hover_button dd 0x0000AA00
-  btn_font_hover_button dd 0x00FFFFFF
-  btn_border_hover_button dd 0x0000AA00
-  btn_bg_click_button dd 0x00D47800
-  btn_font_click_button dd 0x00FFFFFF
-  btn_border_click_button dd 0x00D47800
-  hEdit_textbox dq 0
-  edit_brush_textbox dq 0
-  edit_rect_textbox RECT 10, 80, 147, 116
-  edit_bg_textbox dd 0x00B4B4B4
-  edit_font_textbox dd 0x00000000
-  edit_font_size_textbox dd 14
+  win_bg_w dd 0x001E1E1E
+  hEdit_myEdit dq 0
+  edit_brush_myEdit dq 0
+  edit_rect_myEdit RECT 10, 10, 490, 210
+  edit_bg_myEdit dd 0x002D2D2D
+  edit_font_myEdit dd 0x00CCCCCC
+  edit_font_size_myEdit dd 14
+  _event_text_myEdit du 256 dup(0)
+  _btn_text_btnLoad dw 0x004C, 0x006F, 0x0061, 0x0064, 0, 64 dup(0)
+  btn_rect_btnLoad RECT 10, 230, 110, 260
+  btn_state_btnLoad dd 0
+  btn_gravity_btnLoad dd 37
+  btn_bg_btnLoad dd 0x00D47800
+  btn_font_btnLoad dd 0x00FFFFFF
+  btn_border_btnLoad dd 0x00D47800
+  btn_bg_hover_btnLoad dd 0x00D47800
+  btn_font_hover_btnLoad dd 0x00FFFFFF
+  btn_border_hover_btnLoad dd 0x00D47800
+  btn_bg_click_btnLoad dd 0x00D47800
+  btn_font_click_btnLoad dd 0x00FFFFFF
+  btn_border_click_btnLoad dd 0x00D47800
+  _btn_text_btnSave dw 0x0053, 0x0061, 0x0076, 0x0065, 0, 64 dup(0)
+  btn_rect_btnSave RECT 120, 230, 220, 260
+  btn_state_btnSave dd 0
+  btn_gravity_btnSave dd 37
+  btn_bg_btnSave dd 0x00008000
+  btn_font_btnSave dd 0x00FFFFFF
+  btn_border_btnSave dd 0x00008000
+  btn_bg_hover_btnSave dd 0x00008000
+  btn_font_hover_btnSave dd 0x00FFFFFF
+  btn_border_hover_btnSave dd 0x00008000
+  btn_bg_click_btnSave dd 0x00008000
+  btn_font_click_btnSave dd 0x00FFFFFF
+  btn_border_click_btnSave dd 0x00008000
+
+section '.bss' readable writeable
+  file_buffer db 1048576 dup (?)
+  file_wide_buffer du 524288 dup (?)
 
 section '.code' code readable executable
 start:
@@ -61,7 +69,7 @@ start:
     mov [wc_w.lpfnWndProc], WindowProc_w
     invoke GetModuleHandle, 0
     mov [wc_w.hInstance], rax
-    invoke LoadIcon, [wc_w.hInstance], 1
+    invoke LoadIcon, 0, IDI_APPLICATION
     mov [wc_w.hIcon], rax
     invoke LoadCursor, 0, IDC_ARROW
     mov [wc_w.hCursor], rax
@@ -72,18 +80,20 @@ start:
     invoke RegisterClass, rcx
     test eax, eax
     jz exit_app
-    invoke CreateWindowExW, 0, _class_w, _title_w, WS_OVERLAPPEDWINDOW or WS_VISIBLE or WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT, 400, 300, 0, 0, [wc_w.hInstance], 0
+    invoke CreateWindowExW, 0, _class_w, _title_w, WS_OVERLAPPEDWINDOW or WS_VISIBLE or WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT, 520, 310, 0, 0, [wc_w.hInstance], 0
     test rax, rax
     jz exit_app
     mov [hwnd_w], rax
-    mov [win_width], 400
-    mov [win_height], 300
+    mov [win_width], 520
+    mov [win_height], 310
   .game_loop:
-    invoke InvalidateRect, [hwnd_w], 0, 0
     lea rcx, [msg]
     invoke PeekMessage, rcx, 0, 0, 0, 1
     test eax, eax
-    jz .game_loop
+    jnz .process_msg
+    invoke WaitMessage
+    jmp .game_loop
+  .process_msg:
     cmp [msg.message], 18
     je exit_app
     lea rcx, [msg]
@@ -119,25 +129,28 @@ proc WindowProc_w hwnd, wmsg, wparam, lparam
     invoke DefWindowProc, rcx, rdx, r8, r9
     ret
   .wm_create:
+    mov dword [dark_mode_true], 1
+    lea r8, [dark_mode_true]
+    invoke DwmSetWindowAttribute, rbx, 20, r8, 4
     invoke CreateFont, 16, 0, 0, 0, 400, 0, 0, 0, 204, 0, 0, 5, 0, sys_font_name
     mov [hFont], rax
-    invoke CreateSolidBrush, [edit_bg_textbox]
-    mov [edit_brush_textbox], rax
-    invoke CreateWindowExW, 0, edit_class, 0, WS_CHILD or WS_VISIBLE or ES_MULTILINE or ES_AUTOVSCROLL or WS_VSCROLL, 10, 80, 137, 36, rbx, 2000, [wc_w.hInstance], 0
-    mov [hEdit_textbox], rax
+    invoke CreateSolidBrush, [edit_bg_myEdit]
+    mov [edit_brush_myEdit], rax
+    invoke CreateWindowExW, 0, edit_class, 0, WS_CHILD or WS_VISIBLE or ES_MULTILINE or ES_AUTOVSCROLL or WS_VSCROLL, 10, 10, 480, 200, rbx, 2000, [wc_w.hInstance], 0
+    mov [hEdit_myEdit], rax
     invoke SendMessageW, rax, WM_SETFONT, [hFont], 1
     InitBuffer [win_bg_w]
     invoke InvalidateRect, rbx, 0, 1
     xor eax, eax
     jmp .finish
   .wm_ctlcoloredit:
-    cmp r14, [hEdit_textbox]
-    jne .ne_textbox
-    invoke SetTextColor, rdi, [edit_font_textbox]
-    invoke SetBkColor, rdi, [edit_bg_textbox]
-    mov rax, [edit_brush_textbox]
+    cmp r14, [hEdit_myEdit]
+    jne .ne_myEdit
+    invoke SetTextColor, rdi, [edit_font_myEdit]
+    invoke SetBkColor, rdi, [edit_bg_myEdit]
+    mov rax, [edit_brush_myEdit]
     jmp .finish
-  .ne_textbox:
+  .ne_myEdit:
     pop r13 r12 r14 rdi rsi rbx
     invoke DefWindowProc, rcx, rdx, r8, r9
     ret
@@ -145,86 +158,204 @@ proc WindowProc_w hwnd, wmsg, wparam, lparam
     size_handler
     jmp .finish
   .wm_paint:
-    inc dword [fps_counter]
-    invoke GetTickCount
-    mov ecx, eax
-    sub ecx, [fps_last_tick]
-    cmp ecx, 1000
-    jl .fps_skip
-    mov [fps_last_tick], eax
-    mov eax, [fps_counter]
-    mov [fps_current], eax
-    mov dword [fps_counter], 0
-    mov eax, [fps_current]
-    lea rdi, [fps_buf]
-    call fps_itoa
-  .fps_skip:
     PaintBegin [win_bg_w]
-    invoke CreateFontW, [label_font_size_label], 0, 0, 0, 400, 0, 0, 0, 204, 0, 0, 5, 0, sys_font_name
-    mov r14, rax
-    invoke SelectObject, [mem_dc], r14
-    WiseDrawText [mem_dc], _label_text_label, label_rect_label, [label_gravity_label], [label_font_label]
-    invoke SelectObject, [mem_dc], [hFont]
-    invoke DeleteObject, r14
-    cmp [btn_state_button], 2
-    jne .nc_button
-    WiseFillRect [mem_dc], btn_rect_button, [btn_bg_click_button]
-    WiseDrawText [mem_dc], _btn_text_button, btn_rect_button, [btn_gravity_button], [btn_font_click_button]
-    invoke CreateSolidBrush, [btn_border_click_button]
+    cmp [btn_state_btnLoad], 2
+    jne .nc_btnLoad
+    WiseFillRect [mem_dc], btn_rect_btnLoad, [btn_bg_click_btnLoad]
+    WiseDrawText [mem_dc], _btn_text_btnLoad, btn_rect_btnLoad, [btn_gravity_btnLoad], [btn_font_click_btnLoad]
+    invoke CreateSolidBrush, [btn_border_click_btnLoad]
     mov r15, rax
-    lea rdx, [btn_rect_button]
+    lea rdx, [btn_rect_btnLoad]
     invoke FrameRect, [mem_dc], rdx, r15
     invoke DeleteObject, r15
-    jmp .fd_button
-  .nc_button:
-    cmp [btn_state_button], 1
-    jne .nh_button
-    WiseFillRect [mem_dc], btn_rect_button, [btn_bg_hover_button]
-    WiseDrawText [mem_dc], _btn_text_button, btn_rect_button, [btn_gravity_button], [btn_font_hover_button]
-    invoke CreateSolidBrush, [btn_border_hover_button]
+    jmp .fd_btnLoad
+  .nc_btnLoad:
+    cmp [btn_state_btnLoad], 1
+    jne .nh_btnLoad
+    WiseFillRect [mem_dc], btn_rect_btnLoad, [btn_bg_hover_btnLoad]
+    WiseDrawText [mem_dc], _btn_text_btnLoad, btn_rect_btnLoad, [btn_gravity_btnLoad], [btn_font_hover_btnLoad]
+    invoke CreateSolidBrush, [btn_border_hover_btnLoad]
     mov r15, rax
-    lea rdx, [btn_rect_button]
+    lea rdx, [btn_rect_btnLoad]
     invoke FrameRect, [mem_dc], rdx, r15
     invoke DeleteObject, r15
-    jmp .fd_button
-  .nh_button:
-    WiseFillRect [mem_dc], btn_rect_button, [btn_bg_button]
-    WiseDrawText [mem_dc], _btn_text_button, btn_rect_button, [btn_gravity_button], [btn_font_button]
-    invoke CreateSolidBrush, [btn_border_button]
+    jmp .fd_btnLoad
+  .nh_btnLoad:
+    WiseFillRect [mem_dc], btn_rect_btnLoad, [btn_bg_btnLoad]
+    WiseDrawText [mem_dc], _btn_text_btnLoad, btn_rect_btnLoad, [btn_gravity_btnLoad], [btn_font_btnLoad]
+    invoke CreateSolidBrush, [btn_border_btnLoad]
     mov r15, rax
-    lea rdx, [btn_rect_button]
+    lea rdx, [btn_rect_btnLoad]
     invoke FrameRect, [mem_dc], rdx, r15
     invoke DeleteObject, r15
-  .fd_button:
+  .fd_btnLoad:
+    cmp [btn_state_btnSave], 2
+    jne .nc_btnSave
+    WiseFillRect [mem_dc], btn_rect_btnSave, [btn_bg_click_btnSave]
+    WiseDrawText [mem_dc], _btn_text_btnSave, btn_rect_btnSave, [btn_gravity_btnSave], [btn_font_click_btnSave]
+    invoke CreateSolidBrush, [btn_border_click_btnSave]
+    mov r15, rax
+    lea rdx, [btn_rect_btnSave]
+    invoke FrameRect, [mem_dc], rdx, r15
+    invoke DeleteObject, r15
+    jmp .fd_btnSave
+  .nc_btnSave:
+    cmp [btn_state_btnSave], 1
+    jne .nh_btnSave
+    WiseFillRect [mem_dc], btn_rect_btnSave, [btn_bg_hover_btnSave]
+    WiseDrawText [mem_dc], _btn_text_btnSave, btn_rect_btnSave, [btn_gravity_btnSave], [btn_font_hover_btnSave]
+    invoke CreateSolidBrush, [btn_border_hover_btnSave]
+    mov r15, rax
+    lea rdx, [btn_rect_btnSave]
+    invoke FrameRect, [mem_dc], rdx, r15
+    invoke DeleteObject, r15
+    jmp .fd_btnSave
+  .nh_btnSave:
+    WiseFillRect [mem_dc], btn_rect_btnSave, [btn_bg_btnSave]
+    WiseDrawText [mem_dc], _btn_text_btnSave, btn_rect_btnSave, [btn_gravity_btnSave], [btn_font_btnSave]
+    invoke CreateSolidBrush, [btn_border_btnSave]
+    mov r15, rax
+    lea rdx, [btn_rect_btnSave]
+    invoke FrameRect, [mem_dc], rdx, r15
+    invoke DeleteObject, r15
+  .fd_btnSave:
     PaintEnd
   .wm_mousemove:
     GetMousePos
-    if_mouse_in btn_rect_button, button
-    cmp [btn_state_button], 1
-    je .nr_button
-    mov [btn_state_button], 1
+  cmp eax, [btn_rect_btnLoad.left]
+  jl .skip_hover_btnLoad
+  cmp eax, [btn_rect_btnLoad.right]
+  jg .skip_hover_btnLoad
+  cmp edx, [btn_rect_btnLoad.top]
+  jl .skip_hover_btnLoad
+  cmp edx, [btn_rect_btnLoad.bottom]
+  jg .skip_hover_btnLoad
+    cmp [btn_state_btnLoad], 1
+    je .hover_done_btnLoad
+    mov [btn_state_btnLoad], 1
     invoke InvalidateRect, rbx, 0, 0
-    jmp .md_button
-    else_mouse button
-    cmp [btn_state_button], 0
-    je .nr_button
-    mov [btn_state_button], 0
+    jmp .hover_done_btnLoad
+  .skip_hover_btnLoad:
+    cmp [btn_state_btnLoad], 0
+    je .hover_done_btnLoad
+    mov [btn_state_btnLoad], 0
     invoke InvalidateRect, rbx, 0, 0
-    end_mouse button
-  .nr_button:
+  .hover_done_btnLoad:
+  cmp eax, [btn_rect_btnSave.left]
+  jl .skip_hover_btnSave
+  cmp eax, [btn_rect_btnSave.right]
+  jg .skip_hover_btnSave
+  cmp edx, [btn_rect_btnSave.top]
+  jl .skip_hover_btnSave
+  cmp edx, [btn_rect_btnSave.bottom]
+  jg .skip_hover_btnSave
+    cmp [btn_state_btnSave], 1
+    je .hover_done_btnSave
+    mov [btn_state_btnSave], 1
+    invoke InvalidateRect, rbx, 0, 0
+    jmp .hover_done_btnSave
+  .skip_hover_btnSave:
+    cmp [btn_state_btnSave], 0
+    je .hover_done_btnSave
+    mov [btn_state_btnSave], 0
+    invoke InvalidateRect, rbx, 0, 0
+  .hover_done_btnSave:
     invoke SetCursor, [wc_w.hCursor]
     jmp .finish
   .wm_lbuttondown:
     GetMousePos
-    if_mouse_in btn_rect_button, cl_button
-    jmp .mc_button
-    else_mouse cl_button
-    end_mouse cl_button
-  .mc_button:
+  cmp eax, [btn_rect_btnLoad.left]
+  jl .skip_click_btnLoad
+  cmp eax, [btn_rect_btnLoad.right]
+  jg .skip_click_btnLoad
+  cmp edx, [btn_rect_btnLoad.top]
+  jl .skip_click_btnLoad
+  cmp edx, [btn_rect_btnLoad.bottom]
+  jg .skip_click_btnLoad
+    mov [btn_state_btnLoad], 2
+    invoke CreateFileW, _fpath_6809, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0
+    cmp rax, INVALID_HANDLE_VALUE
+    je .file_done_btnLoad__fpath_6809_0
+    mov [file_handle], rax
+    invoke ReadFile, [file_handle], file_buffer, 1048575, file_bytes_read, 0
+    mov rcx, [file_bytes_read]
+    mov byte [file_buffer + rcx], 0
+    invoke CloseHandle, [file_handle]
+    invoke MultiByteToWideChar, 65001, 0, file_buffer, -1, file_wide_buffer, 524288
+    invoke SetWindowTextW, [hEdit_myEdit], file_wide_buffer
+  .file_done_btnLoad__fpath_6809_0:
+    lea rdi, [_btn_text_btnLoad]
+    mov ecx, 64
+    xor eax, eax
+  .clear_title_btnLoad:
+    mov word [rdi], ax
+    add rdi, 2
+    loop .clear_title_btnLoad
+    lea rdi, [_btn_text_btnLoad]
+    mov word [rdi], 0x0050
+    add rdi, 2
+    mov word [rdi], 0x0072
+    add rdi, 2
+    mov word [rdi], 0x0065
+    add rdi, 2
+    mov word [rdi], 0x0073
+    add rdi, 2
+    mov word [rdi], 0x0073
+    add rdi, 2
+    mov word [rdi], 0x0065
+    add rdi, 2
+    mov word [rdi], 0x0064
+    add rdi, 2
+    invoke InvalidateRect, rbx, 0, 1
+  .skip_click_btnLoad:
+  cmp eax, [btn_rect_btnSave.left]
+  jl .skip_click_btnSave
+  cmp eax, [btn_rect_btnSave.right]
+  jg .skip_click_btnSave
+  cmp edx, [btn_rect_btnSave.top]
+  jl .skip_click_btnSave
+  cmp edx, [btn_rect_btnSave.bottom]
+  jg .skip_click_btnSave
+    mov [btn_state_btnSave], 2
+    invoke CreateFileW, _fpath_6809, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0
+    cmp rax, INVALID_HANDLE_VALUE
+    je .file_done_btnSave__fpath_6809_0
+    mov [file_handle], rax
+    invoke GetWindowTextW, [hEdit_myEdit], file_wide_buffer, 524288
+    invoke WideCharToMultiByte, 65001, 0, file_wide_buffer, -1, file_buffer, 1048576, 0, 0
+    invoke lstrlenA, file_buffer
+    mov [file_bytes_read], rax
+    invoke WriteFile, [file_handle], file_buffer, [file_bytes_read], file_bytes_read, 0
+    invoke CloseHandle, [file_handle]
+  .file_done_btnSave__fpath_6809_0:
+    lea rdi, [_btn_text_btnSave]
+    mov ecx, 64
+    xor eax, eax
+  .clear_title_btnSave:
+    mov word [rdi], ax
+    add rdi, 2
+    loop .clear_title_btnSave
+    lea rdi, [_btn_text_btnSave]
+    mov word [rdi], 0x0050
+    add rdi, 2
+    mov word [rdi], 0x0072
+    add rdi, 2
+    mov word [rdi], 0x0065
+    add rdi, 2
+    mov word [rdi], 0x0073
+    add rdi, 2
+    mov word [rdi], 0x0073
+    add rdi, 2
+    mov word [rdi], 0x0065
+    add rdi, 2
+    mov word [rdi], 0x0064
+    add rdi, 2
+    invoke InvalidateRect, rbx, 0, 1
+  .skip_click_btnSave:
     jmp .finish
   .wm_destroy:
     DestroyGDI
-    invoke DeleteObject, [edit_brush_textbox]
+    invoke DeleteObject, [edit_brush_myEdit]
     dec qword [sys_win_count]
     cmp qword [sys_win_count], 0
     jne .skip_quit
@@ -235,32 +366,6 @@ proc WindowProc_w hwnd, wmsg, wparam, lparam
     pop r13 r12 r14 rdi rsi rbx
     ret
 endp
-fps_itoa:
-    push rbx rcx rdx
-    mov ebx, 10
-    xor ecx, ecx
-    cmp eax, 0
-    jne .itoa_push
-    mov word [rdi], '0'
-    mov word [rdi+2], 0
-    pop rdx rcx rbx
-    ret
-  .itoa_push:
-    xor edx, edx
-    div ebx
-    add dl, '0'
-    push rdx
-    inc ecx
-    test eax, eax
-    jnz .itoa_push
-  .itoa_pop:
-    pop rax
-    mov [rdi], ax
-    add rdi, 2
-    loop .itoa_pop
-    mov word [rdi], 0
-    pop rdx rcx rbx
-    ret
 
 section '.idata' import data readable writeable
   library kernel32, 'KERNEL32.DLL', user32, 'USER32.DLL', gdi32, 'GDI32.DLL', dwmapi, 'DWMAPI.DLL', ole32, 'OLE32.DLL', gdiplus, 'GDIPLUS.DLL'
@@ -270,10 +375,4 @@ section '.idata' import data readable writeable
   import dwmapi, DwmSetWindowAttribute, 'DwmSetWindowAttribute'
   import ole32, CoInitialize, 'CoInitialize', CoUninitialize, 'CoUninitialize'
   import gdiplus, GdiplusStartup, 'GdiplusStartup', GdiplusShutdown, 'GdiplusShutdown'
-
-section '.rsrc' resource data readable
-  directory RT_ICON, icons, RT_GROUP_ICON, group_icons
-  resource icons, 1, LANG_NEUTRAL, icon_data
-  resource group_icons, 1, LANG_NEUTRAL, main_icon
-  icon main_icon, icon_data, 'C:/Users/17D3~1/Desktop/ALPHAD~1/res/main.ico'
 

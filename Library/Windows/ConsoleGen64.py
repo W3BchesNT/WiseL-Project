@@ -5,7 +5,7 @@ if CORE_PATH not in sys.path: sys.path.insert(0, CORE_PATH)
 import Console, Values
 
 
-def _gen_block(ast_block, counters, all_vars):
+def _gen_block(ast_block, counters, all_vars, strings_data):
     data_lines, code_lines = [], []
     for node in ast_block:
         if isinstance(node, Console.Print):
@@ -14,14 +14,8 @@ def _gen_block(ast_block, counters, all_vars):
                 data_lines.append(f"crlf_print_{idx} db 13,10")
                 code_lines.append(f"    invoke WriteFile, rbx, crlf_print_{idx}, 2, bytes_read, 0")
             elif node.value.lstrip("-").isdigit():
-                code_lines += [
-                    f"    mov rax, {node.value}",
-                    f"    lea rdi, [_itoa_buf]",
-                    f"    call _itoa",
-                    f"    mov r8, rax",
-                    f"    invoke WriteFile, rbx, _itoa_buf, r8, bytes_read, 0",
-                    f"    invoke WriteFile, rbx, crlf, 2, bytes_read, 0",
-                ]
+                code_lines += _print_number(node.value)
+                code_lines.append(_print_crlf())
             else:
                 t = node.value.replace("'", "''")
                 data_lines += [f"str_print_{idx} db '{t}',13,10", f"str_print_{idx}_len = $ - str_print_{idx}"]
@@ -72,12 +66,43 @@ def _gen_expr(target, expr):
             break
     return code
 
+def _print_number(value):
+    return [
+        f"    mov rax, {value}",
+        f"    lea rdi, [_itoa_buf]",
+        f"    call _itoa",
+        f"    mov r8, rax",
+        f"    invoke WriteFile, rbx, _itoa_buf, r8, bytes_read, 0",
+    ]
+
 
 def generate(ast):
     data_lines, code_lines = [], []
     counters = {"print": 0, "input": 0, "pause": 0, "for": 0}
     needs_lstrlen = False
     needs_lstrcmp = False
+    strings_data = []
+    str_counter = 0
+    
+    kernel32_extra = []
+    user32_extra = []
+    other_dlls = {}
+    
+    for node in ast:
+        if isinstance(node, Console.DllImport):
+            dll_name = node.dll.lower().replace('.dll', '')
+            for func in node.funcs:
+                if dll_name == 'kernel32':
+                    if func['name'] not in kernel32_extra:
+                        kernel32_extra.append(func['name'])
+                elif dll_name == 'user32':
+                    if func['name'] not in user32_extra:
+                        user32_extra.append(func['name'])
+                else:
+                    if node.dll not in other_dlls:
+                        other_dlls[node.dll] = []
+                    if func['name'] not in other_dlls[node.dll]:
+                        other_dlls[node.dll].append(func['name'])
     
     code_lines += [
         "start:",
@@ -149,7 +174,7 @@ def generate(ast):
             code_lines.append(f"    jg .end_{cid}")
             
             if node['body']:
-                inner_data, inner_code = _gen_block(node['body'], counters, all_vars)
+                inner_data, inner_code = _gen_block(node['body'], counters, all_vars, strings_data)
                 data_lines += inner_data
                 code_lines += inner_code
             
@@ -187,7 +212,7 @@ def generate(ast):
             code_lines.append(f"    {jmp_map[op]}")
             
             if node['body']:
-                inner_data, inner_code = _gen_block(node['body'], counters, all_vars)
+                inner_data, inner_code = _gen_block(node['body'], counters, all_vars, strings_data)
                 data_lines += inner_data
                 code_lines += inner_code
             
@@ -195,7 +220,7 @@ def generate(ast):
             code_lines.append(f"  .else_{cid}:")
             
             if node['else_body'] is not None and len(node['else_body']) > 0:
-                inner_data, inner_code = _gen_block(node['else_body'], counters, all_vars)
+                inner_data, inner_code = _gen_block(node['else_body'], counters, all_vars, strings_data)
                 data_lines += inner_data
                 code_lines += inner_code
             
@@ -205,21 +230,13 @@ def generate(ast):
             name = node["name"]
             vi = all_vars.get(name, {'type': 'int', 'value': 0})
             if vi.get('type') == 'string':
-                needs_lstrlen = True
                 code_lines += [
                     f"    invoke lstrlenA, [var_{name}]",
                     f"    invoke WriteFile, rbx, [var_{name}], rax, bytes_read, 0",
-                    f"    invoke WriteFile, rbx, crlf, 2, bytes_read, 0",
                 ]
             else:
-                code_lines += [
-                    f"    mov rax, [var_{name}]",
-                    f"    lea rdi, [_itoa_buf]",
-                    f"    call _itoa",
-                    f"    mov r8, rax",
-                    f"    invoke WriteFile, rbx, _itoa_buf, r8, bytes_read, 0",
-                    f"    invoke WriteFile, rbx, crlf, 2, bytes_read, 0",
-                ]
+                code_lines += _print_number(f"[var_{name}]")
+            code_lines.append(_print_crlf())
         
         elif isinstance(node, Console.Print):
             idx = counters["print"]; counters["print"] += 1
@@ -227,14 +244,8 @@ def generate(ast):
                 data_lines.append(f"crlf_print_{idx} db 13,10")
                 code_lines.append(f"    invoke WriteFile, rbx, crlf_print_{idx}, 2, bytes_read, 0")
             elif node.value.lstrip("-").isdigit():
-                code_lines += [
-                    f"    mov rax, {node.value}",
-                    f"    lea rdi, [_itoa_buf]",
-                    f"    call _itoa",
-                    f"    mov r8, rax",
-                    f"    invoke WriteFile, rbx, _itoa_buf, r8, bytes_read, 0",
-                    f"    invoke WriteFile, rbx, crlf, 2, bytes_read, 0",
-                ]
+                code_lines += _print_number(node.value)
+                code_lines.append(_print_crlf())
             else:
                 t = node.value.replace("'", "''")
                 data_lines += [f"str_print_{idx} db '{t}',13,10", f"str_print_{idx}_len = $ - str_print_{idx}"]
@@ -275,7 +286,20 @@ def generate(ast):
             code_lines.append(f"    invoke ExitProcess, {node.code}")
         
         elif isinstance(node, Console.CallFunc):
-            code_lines.append(f"    invoke {node.func}, {', '.join(node.args)}")
+            args = []
+            for arg in node.args:
+                if arg.startswith('"') and arg.endswith('"'):
+                    str_text = arg[1:-1]
+                    label = f"_str_{str_counter}"
+                    str_counter += 1
+                    strings_data.append(f"  {label} db '{str_text}',0")
+                    args.append(label)
+                elif arg.startswith('[') and arg.endswith(']'):
+                    var_name = arg[1:-1]
+                    args.append(f"[var_{var_name}]")
+                else:
+                    args.append(arg)
+            code_lines.append(f"    invoke {node.func}, {', '.join(args)}")
         
         elif isinstance(node, Console.DllImport):
             pass
@@ -287,8 +311,36 @@ def generate(ast):
     if not any(isinstance(n, Console.ExitApp) for n in ast):
         code_lines.append("    invoke ExitProcess, 0")
     
-    lstrlen_imp = ", lstrlenA, 'lstrlenA'" if needs_lstrlen else ""
-    lstrcmp_imp = ", lstrcmpiA, 'lstrcmpiA'" if needs_lstrcmp else ""
+    data_lines += strings_data
+    
+    kernel32_funcs = ['ExitProcess', 'GetStdHandle', 'WriteFile', 'ReadConsoleA', 'SetConsoleOutputCP', 'Sleep']
+    if needs_lstrlen: kernel32_funcs.append('lstrlenA')
+    if needs_lstrcmp: kernel32_funcs.append('lstrcmpiA')
+    for f in kernel32_extra:
+        if f not in kernel32_funcs:
+            kernel32_funcs.append(f)
+    
+    user32_funcs = ['MessageBoxA']
+    for f in user32_extra:
+        if f not in user32_funcs:
+            user32_funcs.append(f)
+    
+    idata_lines = []
+    idata_lines.append("  library kernel32, 'KERNEL32.DLL', msvcrt, 'msvcrt.dll', user32, 'user32.dll'")
+    for dll in other_dlls:
+        dll_short = dll.replace('.dll', '')
+        idata_lines.append(f"  library {dll_short}, '{dll}'")
+    
+    k32_imports = ', '.join([f"{f}, '{f}'" for f in kernel32_funcs])
+    idata_lines.append(f"  import kernel32, {k32_imports}")
+    idata_lines.append("  import msvcrt, system, 'system'")
+    u32_imports = ', '.join([f"{f}, '{f}'" for f in user32_funcs])
+    idata_lines.append(f"  import user32, {u32_imports}")
+    
+    for dll, funcs in other_dlls.items():
+        dll_short = dll.replace('.dll', '')
+        dll_imports = ', '.join([f"{f}, '{f}'" for f in funcs])
+        idata_lines.append(f"  import {dll_short}, {dll_imports}")
     
     return f"""format PE64 CONSOLE
 entry start
@@ -331,8 +383,5 @@ _itoa:
     ret
 
 section '.idata' import data readable writeable
-  library kernel32, 'KERNEL32.DLL', msvcrt, 'msvcrt.dll', user32, 'user32.dll'
-  import kernel32, ExitProcess, 'ExitProcess', GetStdHandle, 'GetStdHandle', WriteFile, 'WriteFile', ReadConsoleA, 'ReadConsoleA', SetConsoleOutputCP, 'SetConsoleOutputCP'{lstrlen_imp}{lstrcmp_imp}
-  import msvcrt, system, 'system'
-  import user32, MessageBoxA, 'MessageBoxA'
+{chr(10).join(idata_lines)}
 """

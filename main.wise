@@ -2,33 +2,49 @@ Use WinX64
 
 init main:
     window w:
-        width = 400
-        height = 300
-        toolbar = "Light"
-        icon = "res/main.ico"
+        title = "File Test"
+        width = 520
+        height = 310
+        background = "#1E1E1E"
+        toolbar = "dark"
 
-    label.addFluentLabel:
-        title = "Label 1"
+    myEdit.addFluentTextbox:
         x = 10
         y = 10
-        font_size = 16
+        width = 480
+        height = 200
+        background = "#2D2D2D"
+        font_color = "#CCCCCC"
+        font_size = 14
 
-    button.addFluentButton:
-        title = "Button 1"
+    btnLoad.addFluentButton:
+        title = "Load"
         x = 10
-        y = 40
-        width = 120
-        height = 36
+        y = 230
+        width = 100
+        height = 30
         background = "#0078D4"
-        border_color = "#0078D4"
-        hover.background = "#00AA00"
-        hover.border_color = "#00AA00"
+        font_color = "#FFFFFF"
+        gravity = "center"
 
-    textbox.addFluentTextbox:
-        x = 10
-        y = 80
-        width = 137
-        height = 36
-        background = "#B4B4B4"
+    btnLoad.addFunction:
+        title = "Pressed"
+        file.addFileRead "test.txt":
+            myEdit.title = [file.content]
+
+    btnSave.addFluentButton:
+        title = "Save"
+        x = 120
+        y = 230
+        width = 100
+        height = 30
+        background = "#008000"
+        font_color = "#FFFFFF"
+        gravity = "center"
+
+    btnSave.addFunction:
+        title = "Pressed"
+        file.addFileWrite "test.txt":
+            content = myEdit.title
 
     w.show()

@@ -1,4 +1,5 @@
 # Library/Windows/RandomGen64.py
+"""Генератор случайных чисел для Windows x64"""
 import os, sys, re
 CORE_PATH = os.path.join(os.path.dirname(__file__), '..', 'Core')
 if CORE_PATH not in sys.path: sys.path.insert(0, CORE_PATH)
@@ -10,15 +11,16 @@ def generate(obj_name, prop, expr_str):
     if not rand:
         return []
     
-    count = (rand.max_val - rand.min_val) // rand.step + 1
+    step = rand.step if rand.step else 1
+    count = (rand.max_val - rand.min_val) // step + 1
     
     code = [
-        f"    ; {obj_name}.{prop} = random {rand.min_val} {rand.max_val}",
+        f"    ; {obj_name}.{prop} = random {rand.min_val} {rand.max_val} step {step}",
         f"    invoke GetTickCount",
         f"    xor edx, edx",
         f"    mov ecx, {count}",
         f"    div ecx",
-        f"    imul edx, {rand.step}",
+        f"    imul edx, {step}",
         f"    add edx, {rand.min_val}",
         f"    mov [obj_{obj_name}_{prop}], edx",
     ]
@@ -30,15 +32,16 @@ def generate_console(var_name, expr_str):
     if not rand:
         return []
     
-    count = (rand.max_val - rand.min_val) // rand.step + 1
+    step = rand.step if rand.step else 1
+    count = (rand.max_val - rand.min_val) // step + 1
     
     code = [
-        f"    ; {var_name} = random {rand.min_val} {rand.max_val}",
+        f"    ; {var_name} = random {rand.min_val} {rand.max_val} step {step}",
         f"    invoke GetTickCount",
         f"    xor edx, edx",
         f"    mov ecx, {count}",
         f"    div ecx",
-        f"    imul edx, {rand.step}",
+        f"    imul edx, {step}",
         f"    add edx, {rand.min_val}",
         f"    mov [var_{var_name}], edx",
     ]

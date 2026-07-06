@@ -1,5 +1,5 @@
 # Library/Core/Timer.py
-"""Парсер таймеров WiseL — с поддержкой if"""
+"""Парсер таймеров WiseL — с поддержкой if и random step"""
 import re
 
 
@@ -54,7 +54,6 @@ def parse_timer(lines, start_i):
 
 
 def parse_actions(lines, start_i):
-    """Парсит список действий (включая вложенные if)"""
     actions = []
     i = start_i
     
@@ -77,14 +76,15 @@ def parse_actions(lines, start_i):
             actions.append(IfBlock(left_obj, left_prop, op, right_obj, right_prop, body))
             continue
         
-        # obj.prop = random MIN MAX
-        m_rand = re.match(r'(\w+)\.(\w+)\s*=\s*random\s+(-?\d+)\s+(-?\d+)', line)
+        # obj.prop = random MIN MAX step STEP
+        m_rand = re.match(r'(\w+)\.(\w+)\s*=\s*random\s+(-?\d+)\s+(-?\d+)(?:\s+step\s+(\d+))?', line)
         if m_rand:
             obj_name = m_rand.group(1)
             prop = m_rand.group(2)
             min_val = m_rand.group(3)
             max_val = m_rand.group(4)
-            actions.append(TimerAction(obj_name, prop, 'random', f"{min_val} {max_val}"))
+            step = m_rand.group(5) if m_rand.group(5) else '20'
+            actions.append(TimerAction(obj_name, prop, 'random', f"{min_val} {max_val} {step}"))
             i += 1
             continue
         
